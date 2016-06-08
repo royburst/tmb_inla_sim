@@ -1,0 +1,295 @@
+   
+
+\title{Write-up for a simulation environment to compare INLA and TMB}
+
+\author{Roy Burstein}
+\date{\today}
+
+\documentclass[12pt]{article}
+
+\usepackage{relsize}
+\usepackage{float}
+\usepackage{url}
+\usepackage{graphicx}
+\usepackage{fancyvrb}
+\usepackage{hyperref}
+
+\begin{document}
+\maketitle
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\texttt{see here for code: \url{https://github.com/royburst/tmb_inla_sim}} \\\
+
+
+\section{Background}
+
+This work arises from a project we are developing to fit geostatistical models to georeferened data on child mortality. In the past, analysts interested in this phenomenon have typically aggregated data on death events and exposure months to the national level. In our case, we attempt to use the data at the geo-located survey cluster level, allowing us take advantage of spatial correlation to make better subnational estimates (while also needed to deal with issues that arise from small samples and rare events). Until now, we had been fitting the models using R-INLA (\url{https://www.r-inla.org/download}), mostly due to its speed and ease of use as a high quality package to fit geostatistical models in R. Like INLA, TMB (\url{www.tmb-project.org}) makes use of sparse precision matrices to greatly speed up computation times. Unlike INLA, TMB allows users the flexibility to specify their own likelihoods, which can be extremely useful for future applications in our research. For this reason, we are interested in scoping TMB as a potential software for fitting our models in the future.  \\
+
+In this paper, we describe the development of a software package to simulate spatial data of the type we are trying to model, and to fit and compare implementations of geostatistical models using INLA and TMB. By trying to fit models to a known ``truth'' that arises from the same data generating process we assume in the models, we have an environment that allows us to make fair comparisons among the two. We can also ensure that, given a number of samples approaching infinity, we get unbiased parameter estimates. In doing so, we aim to answer the following questions:
+
+\begin{enumerate}
+\item Do we acheive the same/similar predictions and parameter estimates? If not why.
+\item Which model fitting software does a better job approximating the truth?
+\item How do runtimes of the two different models compare?
+\end{enumerate}
+
+
+In the sections that follow, we describe the model, the simulation, briefly overview INLA and TMB, use the results to explore the questions above, and finally discuss next steps. 
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{The model}
+
+
+Through data collected in complete birth histories and aggregated to a time period $t$ and survey cluster $i$, we observe $N_{i,t}^+$ child deaths, which we assume arise from a binomial distribution with probability $p_{i,t}$ and total monthly exposures $N_{i,t}$:
+
+$$ N_{i,t}^+ \sim Binomial(p_{i,t},N_{i,t})  $$
+
+We model $p_{i,t}$ as linear in logit space:
+
+$$ log(\frac{p_{i,t}}{1-p_{i,t}}) = \alpha + \boldsymbol{X}_{i,t}\beta + \epsilon_{i,t}  $$
+
+
+Where $\alpha$ is a global intercept, and $\beta$ is a vector of regression coefficients on cluster-level covariate values $\boldsymbol{X}_i$. The residual term $\epsilon_{i,t}$ is drawn from a Gaussian Process (GP) with mean zero and a spatio-temporal covariance matrix, constructed as the Kronecker product ($\otimes$) of a spatial covariance matrix $\boldsymbol{K}_{space}$ and temporal covariance matrix $\boldsymbol{K}_{time}$. $\boldsymbol{K}_{space}$ was defined by a stationary Matérn covariance function over the Euclidean distance matrix $\boldsymbol{D}$. $\boldsymbol{K}_{time}$ was defined by the covariance function corresponding to the discrete-time autoregressive stochastic process of order one (AR1). The AR1 process:
+
+$$ \epsilon \sim GP(0,\boldsymbol{K}_{space} \otimes \boldsymbol{K}_{time}) $$
+$$ \boldsymbol{K}_{space}= \tau(2^{\eta-1} \Gamma(\eta))(\kappa\boldsymbol{D})^\eta K_{\eta}(\kappa\boldsymbol{D}) $$
+$$ \boldsymbol{K}_{time_{i,j}}^{-1} = (1+\rho^2) \text{  where }   |t_i-t_j|=0  $$
+$$ \boldsymbol{K}_{time_{i,j}}^{-1} = -\rho^2  \text{  where }   |t_i-t_j|=1  $$
+$$ \boldsymbol{K}_{time_{i,j}}^{-1} = 0  \text{  otherwise }    $$
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Simulation}
+
+
+We defined a function in \texttt{R} that can produce randomly generated surfaces of any size, then sample ``survey clusters'' from them, yielding a dataset of spatially located counts of deaths and exposure months where the true underlying $p_{i,t}$ is known for all locations, along with its fixed effect coefficients and the parameters describing the underyling random field ($\epsilon$). Any number of spatial covariates can be applied as well (and are also randomly generated spatially correlated surfaces). The code below simulates 6 time periods:
+
+\begin{Verbatim}[fontsize=\relsize{-4}]
+mortsim(
+ nu         = 2            ,  #  Matern smoothness parameter 
+ betas      = c(-3,-1,1,1) ,  #  Intercept coef and covariate coef For Linear predictors
+ scale      = 2            ,  #  Matern scale parameter
+ Sigma2     = (1) ^ 2      ,  #  Variance (inverse of tau)
+ rho        = 0.9          ,  #  AR1 term
+ l          = 51           ,  #  Matrix Length for 
+ n_clusters = 100          ,  #  number of clusters sampled ]
+ n_periods  = 6            ,  #  number of periods (1 = no spacetime)
+ mean.exposure.months = 100,  #  mean exposure months per cluster
+ extent = c(0,1,0,1)       ,  #  xmin,xmax,ymin,ymax
+ ncovariates = 3           ,  #  how many covariates to include?
+ seed   = 1234             )  #  set seed for replication
+\end{Verbatim}
+
+As an illustration, the following 6 surfaces would then be produced:
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=5in]{simfig.png}
+\end{figure}
+
+
+We can then take a look at how locations were sampled at each time period. Below we show an example for time period 5 in the above figure, where smaller circles indicate locations where fewer relative deaths were observed (overlapping the red areas with lower values of $p$).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=2.5in]{simfig2.png}
+\end{figure}
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Comparing Performance}
+
+By changing certain inputs in the data generating process function, we can test over many simulation experiments how sensitive, in both a relative and an absolute way, INLA and TMB are to fitting to different underlying data. Some of these paramters to change include:
+
+\begin{itemize}
+
+  \item Number of periods
+  \item Number of exposure months per period
+  \item Number of clusters sampled per period
+  \item Number of covariates in the model
+  \item The values of the fixed effects
+  \item Hyperparameters of the random effect
+  \item Predictive contribution of covariates versus latent field
+
+\end{itemize}
+
+
+Metrics of interest to track include:
+
+\begin{itemize}
+
+  \item Error/bias in all parameter estimates 
+  \item Predictive Error and RMSE
+  \item Runtimes (especially how they scale)
+  \item 95\% CI coverage
+
+\end{itemize}
+
+We currently run 10 simulations for each changing value of the data generation parameters. This ends up requring thousands of cycles of simulations and fits. We wrote a convenient function \texttt{simNfit()} which takes DGP parameters as input, simulates, fits, and returns as a list the diagnostic metrics of interest. 
+
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Results}
+
+In this section, we present a number of line charts, with TMB in blue and INLA in red, representing how the various metrics (Y-axis) change with changing inputs to the simulation (X-axis). In all cases, we only vary one simulation input at a time. Both INLA and TMB were run on one thread, and both use the same SPDE mesh. 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Runtimes}
+
+
+Runtimes in TMB seem to scale better than runtimes in INLA as more data are added. For example, below we plot average model runtimes as we sample more clusters and include more periods. It is clear in both cases that runtime seems to be increasing more quickly in INLA. Other factors, such as adding up to 10 covariates seemed to inrease runtime equally in both. 
+
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=2.5in]{numclusters_runtime.png}
+\caption{Average runtimes in INLA and TMB as the number of survey clustered samples increases.}
+\end{figure}
+
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=2.5in]{numperiods_runtime.png}
+\caption{Average runtimes in INLA and TMB as the number of periods increases.}
+\end{figure}
+
+
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=2.5in]{nc_runtime.png}
+\caption{Average runtimes in INLA and TMB as the number of covariates increases.}
+\end{figure}
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Error in parameter estimates}
+
+In the plots below, we show error in parameter estimates relative to the true simulated values. In an RMLE setting such as this, we expect unbiased parameter estimates as the sample size approaches infinity. The plots show the difference between the true and estimated parameters, thus we expect an unbiased result to be zero. 
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsubsection{Fixed effects}
+
+There was consistency in the estimation of fixed effect coefficients, and they do not seem to produce bias results in either INLA or TMB. Below we show how the error in the intercept seems to be centered on zero. 
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=2.5in]{numclusters_int.png}
+\caption{Average error in intercept coefficient ($\alpha$) in INLA and TMB as the number of clusters sampled increases.}
+\end{figure}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsubsection{Random effects}
+
+The parameters $\kappa$ and $\tau$ control the scale and variance of the Matern spatial covariance function, part of the variance term of the Gaussian Process. The parameter $\rho$ controls the strength of the AR1 temporal process of the same GP process. These parameters are all giving issues at the moment, leading us to suspect there is either a bug in the code or parameterization issue. \\\
+
+Below we plot the error in Log$\kappa$ as exposure months increase. We see that up to 1000 exposure months, both INLA and TMB seem to be returning biased estimates, which seem to be improving as data increases. TMB estimate seems to be slightly more biased than INLA. 
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=2.5in]{log_kappa_exposures.png}
+\caption{Average error in Log$\kappa$ as exposure months increase.}
+\end{figure}
+
+In the plot below, we see that the average error in Log$\tau$ actually seems to be increasing as more survey clusters are added. This is totally at odds which what we expect. Since both functions seem to be similar in both INLA and TMB, we suspect this is the result of a parameterization difference between the simulation and the models (to be looked into further). 
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=2.5in]{log_tau_E_numclusters.png}
+\caption{Average error in Log$\tau$ as the number of sampled clusters increases.}
+\end{figure}
+
+As we add more periods, $\rho$ in INLA seems to be moving toward a more unbiased estimate. The TMB estimate for $\rho$ is consistently downward biased. Since its function is the same though, we again suspect a parameterization issue (also to be looked into further). 
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=2.5in]{rho_numperiods.png}
+\caption{Average error in $\rho$ as the number of periods increases.}
+\end{figure}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Predictive error and RMSE}
+
+Ultimately, we hope to fit models that do not yield biased predictions, and also produce predictions with minimal total error. To explore these, we look at the mean predictive error over the full grid (simply true $p_{i,t} - \hat{p_{i,t}$, as well as the root mean squared error (RMSE) for all points. \\\
+
+In all cases, neither model seemed to produce biased predictions. In other words, predictive error seems to be centered around zero. It seems that INLA fit with less variance in the predictive error. Below, we plot the average predictive error as the ratio of the linear terms ($\alpha + \boldsymbol{X}_{i,t}\beta$) to spatial term ($\epsilon_{i,t}}$) increases. If there was a problem with either the spatial field or the fixed effects term, we would expect to see anomolies at the ends of the X-axis here, but we do not. 
+
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=2.5in]{meanpe_ratio.png}
+\caption{Average predictive error as the ratio of the linear terms ($\alpha + \boldsymbol{X}_{i,t}\beta$) to spatial term ($\epsilon_{i,t}}$) increases.}
+\end{figure}
+
+
+Since we already know there was more variance in the predictive errors in TMB, we expect a higher RMSE. Below we show two RMSE plots. The first shows RMSE as monthly exposures increase, the second shows RMSE against the the linear/spatial ratio. As expected, RMSE improved as more data were added. Interestingly, RMSE went in different directions as the ratio increased - meaning INLA improves estimates as the covariates play a larger role, while INLA does the opposite. 
+
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=2.5in]{rmse_exposures.png}
+\caption{Average RMSE as number of monthly exposures per survey cluster increases.}
+\end{figure}
+
+
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=2.5in]{rmse_ratio.png}
+\caption{Average RMSE as he ratio of the linear terms ($\alpha + \boldsymbol{X}_{i,t}\beta$) to spatial term ($\epsilon_{i,t}}$) increases.}
+\end{figure}
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Results overview}
+
+
+The above plots allow for a framework for diagnosing model issues and comparing relative performance. In our case, they indicate that there are still a few kinks to work on in TMB before we are totally convinced. Many of the issues seem to indicate parameterization issues, which should be fixable, though we are concerned about the high RMSEs in TMB relative to INLA. This work is very much ongoing, and in the following section we outline plans to continue this research. 
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{What's next}
+
+
+\begin{itemize}
+
+
+  \item Better understand why the differences we are seeing emerge. It's likely a simple coding error or parameterization issue at this point.
+  
+  \item Improve a few things to make the two more comparable, and reflective of how they will be run in practice: including incorporating bayesian priors to TMB, and comparing performance with multi-threaded fitting. 
+  
+  \item Compare differences in uncertainty and 95\%CI coverage.
+  
+  \item Look at differences as $p_{i,t}$ changes, specifically regarding child mortality - we want to know how the models perform under rare events. 
+  
+  \item Use shiny or some other tool to visualize these results in a more convenient way, since there will surely be many more iterations of this. 
+  
+  \item Make the simulation more reflective of how data are actually collected (ie, ‘clumpy’ population sampling with large sparse areas of no data, and temporally-varying covariates). 
+  
+  \item Generalize the simulation environment to answer other interesting questions (ie approaches for adaptive sampling, how to best validate binomial data with small sample sizes and rare events, test the current method of resampling polygon data to points – how much does it bias spatial parameters?)
+  
+  \item Once we are convinced the model works, fit using TMB to the real mortality data.
+  
+  \item Use the simulation evironment to test more complex TMB likelihoods (for example, ways to simulataneously include both point and polygon data. )
+  
+\end{itemize
+
+
+
+\end{document}

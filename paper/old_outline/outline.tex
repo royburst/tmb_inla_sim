@@ -1,0 +1,81 @@
+  
+
+\title{Fitting geostatistical models in INLA and TMB: implementation of under-5 mortality mapping in both packages.}
+
+
+\date{\today}
+
+\documentclass[12pt]{article}
+
+\usepackage{outlines}
+\renewcommand{\theenumi}{\Roman{enumi}. }
+\renewcommand{\labelenumi}{\theenumi}
+\renewcommand{\theenumii}{\Alph{enumii}. }
+\renewcommand{\labelenumii}{\theenumii}
+\renewcommand{\theenumiii}{\roman{enumiii}. }
+\renewcommand{\labelenumiii}{\theenumiii}
+\renewcommand{\theenumiv}{\alph{enumiv}) }
+\renewcommand{\labelenumiv}{\theenumiv}
+
+
+\begin{document}
+\maketitle
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{outline}[enumerate]
+   \1 Aims of the project
+      \2 To understand and be able to describe the models and how INLA and TMB fit these models, their relative benefits and drawbacks.
+        \3 A written component
+        \3 A simulation experiment with runtime tests. 
+      \2 To replicate the work already done in INLA in TMB.
+      \2 To set ourselves up to extend the TMB model to deal with both point and polygon data.
+      
+      
+      
+    \1 Background and context
+      \2 Intro, discuss importance of sub-national estimates.
+      \2 Target is to produce a high resolution spatial map of under-5 mortality across Africa. Making predictions at places were we do not have data requires statistical inference - natural choice is model based geostatistics.
+      \2 Describe the data. Binomial outcomes, estimating the probability of events (deaths) over exposures (months lived). For the moment we are dealing exclusively with point data - either as geo-referenced complete birth histories or polygon data that is abstracted down to weighted point data. 
+      
+    \1 Structure of spatio-temporal processes to be modelled
+      \2 Describe the GLMM and the spatio-temporal random effect for binomial data with a logit link.
+      \2 Equations and explanations, overview of MBG models in general and this one specifically. SPDE and all that good stuff.
+      
+    \1 Estimation with INLA: How the model is fitted in INLA
+      \2 Describe, in words, what it is doing
+      \2 Code examples
+      
+    \1 Estimation with TMB: How the model is fitted in INLA
+      \2 Describe, in words, what it is doing
+      \2 Code examples
+            
+
+    \1 Results of simulation experiments.
+      \2 Show we are able to produce the same results in both implementations
+      \2 Compare computational time with both and plot how these scale with growing data sets
+      
+      
+    \1 Discussion of future directions of this work, and what secific things we can do with TMB going forward to improve our work.
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+\end{outline}
+
+
+\end{document}
