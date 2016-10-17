@@ -12,6 +12,7 @@ resources/
 info/
 outline/
 plots/
+inla-model*/
 
 # any compiled things
 *.pdf
