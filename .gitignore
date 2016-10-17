@@ -11,6 +11,7 @@ clusterlogs/
 resources/
 info/
 outline/
+plots/
 
 # any compiled things
 *.pdf
